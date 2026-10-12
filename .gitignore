@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Local configuration & state
+config.json
+
+# IDE / Editor configs
+.vscode/
+.idea/
+*.swp
+*.swo
