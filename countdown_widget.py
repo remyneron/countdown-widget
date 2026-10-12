@@ -691,7 +691,7 @@ class CountdownWidget(QWidget):
         btn_gap = max(3, int(w * 0.012))
         btn_w = (panel_x - 26 - (len(modes) - 1) * btn_gap) / len(modes)
         bx = 14
-        active_mode = "NORMAL" if is_running else "STOP"
+        active_mode = "RACING" if is_running else "STOP"
         
         sample_longest = "NORMAL"
         f_btn_en = QFont("sans-serif", 9, QFont.Weight.Bold)
