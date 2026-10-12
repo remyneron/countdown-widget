@@ -481,8 +481,8 @@ class CountdownWidget(QWidget):
         shear_val = math.tan(math.radians(-slant_deg))
         painter.shear(shear_val, 0)
         
-        t = w * 0.235 # thickness
-        gap = w * 0.04 # gap
+        t = w * 0.21 # thickness
+        gap = w * 0.045 # gap
         half_h = h / 2.0
         
         # Horizontals
@@ -642,7 +642,7 @@ class CountdownWidget(QWidget):
             else:
                 centis = int((total_s - int(total_s)) * 100)
                 
-            m_str = f"{mins}"
+            m_str = f"{mins:02d}"
             s_str = f"{secs:02d}"
             c_str = f"{centis:02d}"
             
@@ -653,47 +653,74 @@ class CountdownWidget(QWidget):
                 timer_lit = QColor(255, 40, 40)
                 timer_unlit = QColor(36, 10, 10)
                 
-            # Dynamic sizing for digits
-            num_chars = len(m_str) + len(s_str) + len(c_str)
-            colon_count = 2
+            # Available display area in left panel
             avail_w = panel_x - 24
+            slant_deg = 5
             
-            digit_w = int(avail_w / (num_chars + colon_count * 0.4 + 1.2))
+            # Unit-based sizing for generous spacing preventing digits from sticking together
+            num_digits = len(m_str) + len(s_str) + len(c_str)
+            # Units: 1.0 per digit, 0.22 per intra-pair gap, 2 * (0.30 colon_w + 2 * 0.35 colon_gap)
+            total_units = (num_digits * 1.0) + (max(0, num_digits - 3) * 0.22) + (2 * (0.30 + 2 * 0.35))
+            u = max(14, int(avail_w / total_units))
+            
+            digit_w = u
             digit_h = int(h * 0.35)
-            digit_gap = max(2, int(digit_w * 0.12))
-            colon_w = max(6, int(digit_w * 0.38))
+            digit_gap = max(5, int(u * 0.22))
+            colon_w = max(6, int(u * 0.30))
+            colon_gap = max(6, int(u * 0.35))
             
+            # Helper to draw colon with matching italic slant
+            def draw_colon(cx, cy, cw, ch):
+                painter.save()
+                painter.translate(cx, cy)
+                shear_val = math.tan(math.radians(-slant_deg))
+                painter.shear(shear_val, 0)
+                dot_s = max(3, int(digit_w * 0.20))
+                dot_x = (cw - dot_s) * 0.5
+                painter.setBrush(QBrush(timer_lit))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRect(QRectF(dot_x, ch * 0.30 - dot_s * 0.5, dot_s, dot_s))
+                painter.drawRect(QRectF(dot_x, ch * 0.68 - dot_s * 0.5, dot_s, dot_s))
+                painter.restore()
+                
+            # Total width of the timer display
+            total_display_w = (
+                len(m_str) * digit_w + (len(m_str) - 1) * digit_gap
+                + colon_gap + colon_w + colon_gap
+                + len(s_str) * digit_w + (len(s_str) - 1) * digit_gap
+                + colon_gap + colon_w + colon_gap
+                + len(c_str) * digit_w + (len(c_str) - 1) * digit_gap
+            )
+            
+            # Perfectly center the timer display in the left panel
             digit_y = int(h * 0.19)
-            cur_x = 14
+            cur_x = 12 + max(0, int((avail_w - total_display_w) / 2))
             
-            # Minutes
+            # 1. Minutes
             for ch in m_str:
-                self.draw_7segment_digit(painter, cur_x, digit_y, digit_w, digit_h, ch, timer_lit, timer_unlit)
+                self.draw_7segment_digit(painter, cur_x, digit_y, digit_w, digit_h, ch, timer_lit, timer_unlit, slant_deg)
                 cur_x += digit_w + digit_gap
-                
+            cur_x -= digit_gap
+            
             # Colon 1
-            painter.setBrush(QBrush(timer_lit))
-            painter.setPen(Qt.PenStyle.NoPen)
-            dot_s = max(3, int(digit_w * 0.22))
-            dot_x = cur_x + (colon_w - dot_s) * 0.5
-            painter.drawRect(QRectF(dot_x, digit_y + digit_h * 0.3 - dot_s * 0.5, dot_s, dot_s))
-            painter.drawRect(QRectF(dot_x, digit_y + digit_h * 0.68 - dot_s * 0.5, dot_s, dot_s))
-            cur_x += colon_w + digit_gap
+            cur_x += colon_gap
+            draw_colon(cur_x, digit_y, colon_w, digit_h)
+            cur_x += colon_w + colon_gap
             
-            # Seconds
+            # 2. Seconds
             for ch in s_str:
-                self.draw_7segment_digit(painter, cur_x, digit_y, digit_w, digit_h, ch, timer_lit, timer_unlit)
+                self.draw_7segment_digit(painter, cur_x, digit_y, digit_w, digit_h, ch, timer_lit, timer_unlit, slant_deg)
                 cur_x += digit_w + digit_gap
-                
-            # Colon 2
-            dot_x2 = cur_x + (colon_w - dot_s) * 0.5
-            painter.drawRect(QRectF(dot_x2, digit_y + digit_h * 0.3 - dot_s * 0.5, dot_s, dot_s))
-            painter.drawRect(QRectF(dot_x2, digit_y + digit_h * 0.68 - dot_s * 0.5, dot_s, dot_s))
-            cur_x += colon_w + digit_gap
+            cur_x -= digit_gap
             
-            # Centiseconds
+            # Colon 2
+            cur_x += colon_gap
+            draw_colon(cur_x, digit_y, colon_w, digit_h)
+            cur_x += colon_w + colon_gap
+            
+            # 3. Centiseconds
             for ch in c_str:
-                self.draw_7segment_digit(painter, cur_x, digit_y, digit_w, digit_h, ch, timer_lit, timer_unlit)
+                self.draw_7segment_digit(painter, cur_x, digit_y, digit_w, digit_h, ch, timer_lit, timer_unlit, slant_deg)
                 cur_x += digit_w + digit_gap
 
         # Bottom status indicators row: [STOP] [SLOW] [NORMAL] [RACING]
