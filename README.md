@@ -6,6 +6,10 @@
 1. **Evangelion (NERV Tactical HUD)** — интерфейс тактического таймера из аниме *Neon Genesis Evangelion* (*«活動限界まで / ACTIVE TIME REMAINING»*).
 2. **Classic Minimalist** — лаконичный круглый циферблат с круговым индикатором прогресса.
 
+| Evangelion (NERV Tactical HUD) | Classic Minimalist |
+| :---: | :---: |
+| <img src="docs/screenshots/skin_evangelion.png" width="420" alt="Evangelion Skin"> | <img src="docs/screenshots/skin_classic.png" width="180" alt="Classic Skin"> |
+
 ---
 
 ## Особенности (Features)

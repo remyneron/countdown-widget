@@ -820,14 +820,17 @@ class CountdownWidget(QWidget):
             pct_val = max(0.0, min(1.0, self.remaining_seconds / self.total_seconds if self.total_seconds > 0 else 0))
             pct_int = int(pct_val * 100)
             
+            label_text = "NERV CH-01 // BATTERY DISCHARGE" if is_running else "NERV CH-01 // EXTERNAL POWER LINK"
             f_tech = QFont("sans-serif", max(5, int(gfx_h * 0.20)), QFont.Weight.Bold)
+            while QFontMetrics(f_tech).horizontalAdvance(label_text) > inner_w - 42 and f_tech.pointSize() > 5:
+                f_tech.setPointSize(f_tech.pointSize() - 1)
             painter.setFont(f_tech)
             painter.setPen(sub_text_col)
-            label_text = "NERV CH-01 // BATTERY DISCHARGE" if is_running else "NERV CH-01 // EXTERNAL POWER LINK"
-            painter.drawText(QRectF(inner_x, gfx_y + 2, inner_w * 0.72, gfx_h * 0.38), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label_text)
+            painter.drawText(QRectF(inner_x, gfx_y + 2, inner_w - 40, gfx_h * 0.38), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label_text)
             
+            painter.setFont(QFont("sans-serif", max(5, int(gfx_h * 0.20)), QFont.Weight.Bold))
             painter.setPen(accent_col)
-            painter.drawText(QRectF(inner_x + inner_w * 0.72, gfx_y + 2, inner_w * 0.28, gfx_h * 0.38), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"{pct_int}%")
+            painter.drawText(QRectF(inner_x + inner_w - 38, gfx_y + 2, 38, gfx_h * 0.38), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"{pct_int}%")
             
             # Middle: Segmented Power / Discharge Bar
             bar_y = gfx_y + int(gfx_h * 0.44)
