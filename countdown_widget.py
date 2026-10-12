@@ -481,8 +481,8 @@ class CountdownWidget(QWidget):
         shear_val = math.tan(math.radians(-slant_deg))
         painter.shear(shear_val, 0)
         
-        t = w * 0.18 # thickness
-        gap = w * 0.045 # gap
+        t = w * 0.235 # thickness
+        gap = w * 0.04 # gap
         half_h = h / 2.0
         
         # Horizontals
@@ -586,6 +586,16 @@ class CountdownWidget(QWidget):
         painter.setPen(QPen(hud_line_col, 1.5))
         painter.drawLine(panel_x, 10, panel_x, h - 10)
         
+        # Right column box metrics (INTERNAL, MAIN ENERGY, EXTERNAL)
+        rx = panel_x + 6
+        rw = w - rx - 10
+        box1_y = 10
+        box1_h = int((h - 32) * 0.38)
+        box2_y = box1_y + box1_h + 6
+        box2_h = int((h - 32) * 0.24)
+        box3_y = box2_y + box2_h + 6
+        box3_h = h - 10 - box3_y
+        
         # Top Header
         font_size_jp = max(8, int(h * 0.044))
         font_jp = QFont("Noto Serif CJK JP", font_size_jp, QFont.Weight.Bold)
@@ -664,9 +674,10 @@ class CountdownWidget(QWidget):
             # Colon 1
             painter.setBrush(QBrush(timer_lit))
             painter.setPen(Qt.PenStyle.NoPen)
-            dot_s = max(2, int(digit_w * 0.16))
-            painter.drawRect(QRectF(cur_x + colon_w * 0.25, digit_y + digit_h * 0.3, dot_s, dot_s))
-            painter.drawRect(QRectF(cur_x + colon_w * 0.25, digit_y + digit_h * 0.68, dot_s, dot_s))
+            dot_s = max(3, int(digit_w * 0.22))
+            dot_x = cur_x + (colon_w - dot_s) * 0.5
+            painter.drawRect(QRectF(dot_x, digit_y + digit_h * 0.3 - dot_s * 0.5, dot_s, dot_s))
+            painter.drawRect(QRectF(dot_x, digit_y + digit_h * 0.68 - dot_s * 0.5, dot_s, dot_s))
             cur_x += colon_w + digit_gap
             
             # Seconds
@@ -675,8 +686,9 @@ class CountdownWidget(QWidget):
                 cur_x += digit_w + digit_gap
                 
             # Colon 2
-            painter.drawRect(QRectF(cur_x + colon_w * 0.25, digit_y + digit_h * 0.3, dot_s, dot_s))
-            painter.drawRect(QRectF(cur_x + colon_w * 0.25, digit_y + digit_h * 0.68, dot_s, dot_s))
+            dot_x2 = cur_x + (colon_w - dot_s) * 0.5
+            painter.drawRect(QRectF(dot_x2, digit_y + digit_h * 0.3 - dot_s * 0.5, dot_s, dot_s))
+            painter.drawRect(QRectF(dot_x2, digit_y + digit_h * 0.68 - dot_s * 0.5, dot_s, dot_s))
             cur_x += colon_w + digit_gap
             
             # Centiseconds
@@ -685,28 +697,30 @@ class CountdownWidget(QWidget):
                 cur_x += digit_w + digit_gap
 
         # Bottom status indicators row: [STOP] [SLOW] [NORMAL] [RACING]
+        # Aligned with External block grid (starts at box3_y) and occupying ~half of its vertical height
         modes = [("STOP", "やめる"), ("SLOW", "スロー"), ("NORMAL", "正常"), ("RACING", "レース")]
-        btn_y = int(h * 0.68)
-        btn_h = int(h * 0.22)
+        btn_y = box3_y
+        gap_under_btn = 5
+        btn_h = int((box3_h - gap_under_btn) * 0.46)
         btn_gap = max(3, int(w * 0.012))
         btn_w = (panel_x - 26 - (len(modes) - 1) * btn_gap) / len(modes)
         bx = 14
         active_mode = "RACING" if is_running else "STOP"
         
         sample_longest = "NORMAL"
-        f_btn_en = QFont("sans-serif", 9, QFont.Weight.Bold)
+        f_btn_en = QFont("sans-serif", 8, QFont.Weight.Bold)
         while QFontMetrics(f_btn_en).horizontalAdvance(sample_longest) > btn_w - 6 and f_btn_en.pointSize() > 5:
             f_btn_en.setPointSize(f_btn_en.pointSize() - 1)
             
-        f_btn_jp = QFont("Noto Serif CJK JP", max(5, int(f_btn_en.pointSize() * 0.85)))
+        f_btn_jp = QFont("Noto Serif CJK JP", max(5, int(f_btn_en.pointSize() * 0.8)))
         
         for en_text, jp_text in modes:
             is_act = (en_text == active_mode)
             box_rect = QRectF(bx, btn_y, btn_w, btn_h)
             if is_act:
                 if en_text in ("STOP", "RACING"):
-                    box_bg = QColor(40, 16, 16, 235)
-                    box_border = QColor(240, 50, 50)
+                    box_bg = QColor(48, 16, 16, 235)
+                    box_border = QColor(245, 50, 50)
                     text_col = QColor(255, 75, 75)
                 else:
                     box_bg = QColor(16, 42, 58, 235)
@@ -718,36 +732,98 @@ class CountdownWidget(QWidget):
                 text_col = QColor(75, 100, 125)
                 
             painter.setBrush(QBrush(box_bg))
-            painter.setPen(QPen(box_border, 1.2))
+            painter.setPen(QPen(box_border, 1.2 if is_act else 1.0))
             painter.drawRect(box_rect)
             
             # English text
             painter.setFont(f_btn_en)
             painter.setPen(text_col)
-            painter.drawText(QRectF(bx, btn_y + 3, btn_w, btn_h * 0.45), Qt.AlignmentFlag.AlignCenter, en_text)
+            painter.drawText(QRectF(bx, btn_y + 2, btn_w, btn_h * 0.46), Qt.AlignmentFlag.AlignCenter, en_text)
+            
+            # Japanese subtext
+            painter.setFont(f_btn_jp)
+            painter.setPen(text_col if is_act else QColor(65, 85, 110))
+            painter.drawText(QRectF(bx, btn_y + btn_h * 0.48, btn_w, btn_h * 0.44), Qt.AlignmentFlag.AlignCenter, jp_text)
             
             # Underline bar for active indicator
             if is_act:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(text_col))
-                painter.drawRect(QRectF(bx + 4, btn_y + btn_h - 4, btn_w - 8, 2.5))
+                painter.drawRect(QRectF(bx + 4, btn_y + btn_h - 3, btn_w - 8, 2))
                 
-            # Japanese subtext
-            painter.setFont(f_btn_jp)
-            painter.setPen(text_col if is_act else QColor(65, 85, 110))
-            painter.drawText(QRectF(bx, btn_y + btn_h * 0.48, btn_w, btn_h * 0.45), Qt.AlignmentFlag.AlignCenter, jp_text)
             bx += btn_w + btn_gap
 
+        # EVA GRAPHIC PANEL: AUXILIARY TELEMETRY & POWER GAUGE
+        # Strictly constrained to end at (box3_y + box3_h = h - 10), matching External block bottom
+        gfx_y = btn_y + btn_h + gap_under_btn
+        gfx_h = (box3_y + box3_h) - gfx_y
+        if gfx_h > 12:
+            gfx_rect = QRectF(14, gfx_y, panel_x - 26, gfx_h)
+            if is_running:
+                gfx_bg = QColor(22, 12, 14, 220)
+                gfx_border = QColor(150, 40, 40)
+                accent_col = QColor(255, 60, 60)
+                sub_text_col = QColor(225, 95, 95)
+                seg_lit_col = QColor(255, 50, 50)
+                seg_unlit_col = QColor(48, 16, 16)
+            else:
+                gfx_bg = QColor(10, 16, 25, 205)
+                gfx_border = QColor(32, 60, 90)
+                accent_col = QColor(0, 220, 250)
+                sub_text_col = QColor(110, 150, 185)
+                seg_lit_col = QColor(0, 225, 250)
+                seg_unlit_col = QColor(16, 28, 42)
+                
+            painter.setBrush(QBrush(gfx_bg))
+            painter.setPen(QPen(gfx_border, 1.2))
+            painter.drawRect(gfx_rect)
+            
+            # Corner accents
+            c_len = min(6, int(gfx_h * 0.22))
+            painter.setPen(QPen(accent_col, 1.5))
+            painter.drawLine(int(gfx_rect.left()), int(gfx_rect.top()), int(gfx_rect.left() + c_len), int(gfx_rect.top()))
+            painter.drawLine(int(gfx_rect.left()), int(gfx_rect.top()), int(gfx_rect.left()), int(gfx_rect.top() + c_len))
+            painter.drawLine(int(gfx_rect.right()), int(gfx_rect.bottom()), int(gfx_rect.right() - c_len), int(gfx_rect.bottom()))
+            painter.drawLine(int(gfx_rect.right()), int(gfx_rect.bottom()), int(gfx_rect.right()), int(gfx_rect.bottom() - c_len))
+            
+            # Top subline: [STATUS // CH-01] on left, [PERCENT] on right
+            inner_x = 20
+            inner_w = int(panel_x - 38)
+            
+            pct_val = max(0.0, min(1.0, self.remaining_seconds / self.total_seconds if self.total_seconds > 0 else 0))
+            pct_int = int(pct_val * 100)
+            
+            f_tech = QFont("sans-serif", max(5, int(gfx_h * 0.20)), QFont.Weight.Bold)
+            painter.setFont(f_tech)
+            painter.setPen(sub_text_col)
+            label_text = "NERV CH-01 // BATTERY DISCHARGE" if is_running else "NERV CH-01 // EXTERNAL POWER LINK"
+            painter.drawText(QRectF(inner_x, gfx_y + 2, inner_w * 0.72, gfx_h * 0.38), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label_text)
+            
+            painter.setPen(accent_col)
+            painter.drawText(QRectF(inner_x + inner_w * 0.72, gfx_y + 2, inner_w * 0.28, gfx_h * 0.38), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"{pct_int}%")
+            
+            # Middle: Segmented Power / Discharge Bar
+            bar_y = gfx_y + int(gfx_h * 0.44)
+            bar_h = max(3, int(gfx_h * 0.22))
+            num_segs = 24
+            seg_gap = 2
+            seg_w = (inner_w - (num_segs - 1) * seg_gap) / num_segs
+            lit_segs = int(round(pct_val * num_segs))
+            
+            painter.setPen(Qt.PenStyle.NoPen)
+            for si in range(num_segs):
+                sx = inner_x + si * (seg_w + seg_gap)
+                painter.setBrush(QBrush(seg_lit_col if si < lit_segs else seg_unlit_col))
+                painter.drawRect(QRectF(sx, bar_y, seg_w, bar_h))
+                
+            # Bottom subline: Japanese telemetry
+            f_sub_jp = QFont("Noto Serif CJK JP", max(4, int(gfx_h * 0.16)))
+            painter.setFont(f_sub_jp)
+            painter.setPen(QColor(140, 165, 190) if not is_running else QColor(200, 100, 100))
+            sub_jp_text = "主電源断線 // 内部電池駆動中" if is_running else "外部電源接続 // 待機電力維持"
+            painter.drawText(QRectF(inner_x, gfx_y + int(gfx_h * 0.70), inner_w, gfx_h * 0.28), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, sub_jp_text)
+
         # RIGHT COLUMN: INTERNAL, MAIN ENERGY, EXTERNAL
-        rx = panel_x + 6
-        rw = w - rx - 10
-        
-        box1_y = 10
-        box1_h = int((h - 32) * 0.38)
-        box2_y = box1_y + box1_h + 6
-        box2_h = int((h - 32) * 0.24)
-        box3_y = box2_y + box2_h + 6
-        box3_h = h - 10 - box3_y
         
         # Hazard stripes area: 30% of rw, placed at the far right
         hazard_w = max(24, int(rw * 0.30))
@@ -793,9 +869,20 @@ class CountdownWidget(QWidget):
             painter.drawLine(sx, box1_y + box1_h, sx + int(box1_h * 0.4), box1_y)
         painter.setClipping(False)
         
-        # 2. MIDDLE BOX: MAIN ENERGY SUPPLY SYSTEM
-        painter.setBrush(QBrush(QColor(14, 20, 30, 210)))
-        painter.setPen(QPen(QColor(36, 70, 102), 1.2))
+        # 2. MIDDLE BOX: MAIN ENERGY SUPPLY SYSTEM (Highlighted in red when running on internal)
+        if int_active:
+            box2_bg = QColor(48, 14, 14, 240)
+            box2_border = QColor(255, 45, 45)
+            box2_text_jp = QColor(255, 65, 65)
+            box2_text_en = QColor(255, 95, 95)
+        else:
+            box2_bg = QColor(14, 20, 30, 210)
+            box2_border = QColor(36, 70, 102)
+            box2_text_jp = QColor(175, 200, 225)
+            box2_text_en = QColor(135, 170, 205)
+
+        painter.setBrush(QBrush(box2_bg))
+        painter.setPen(QPen(box2_border, 1.5 if int_active else 1.2))
         box2_rect = QRectF(rx, box2_y, rw, box2_h)
         painter.drawRect(box2_rect)
         
@@ -803,12 +890,12 @@ class CountdownWidget(QWidget):
         while QFontMetrics(f_mid_jp).horizontalAdvance("主電源供給システム") > rw - 8 and f_mid_jp.pointSize() > 5:
             f_mid_jp.setPointSize(f_mid_jp.pointSize() - 1)
         painter.setFont(f_mid_jp)
-        painter.setPen(QColor(175, 200, 225))
+        painter.setPen(box2_text_jp)
         painter.drawText(QRectF(rx + 4, box2_y + 2, rw - 8, int(box2_h * 0.4)), Qt.AlignmentFlag.AlignCenter, "主電源供給システム")
         
         f_mid_en = QFont("sans-serif", max(5, int(box2_h * 0.16)), QFont.Weight.Bold)
         painter.setFont(f_mid_en)
-        painter.setPen(QColor(135, 170, 205))
+        painter.setPen(box2_text_en)
         painter.drawText(QRectF(rx + 4, box2_y + int(box2_h * 0.4), rw - 8, int(box2_h * 0.28)), Qt.AlignmentFlag.AlignCenter, "MAIN ENERGY")
         painter.drawText(QRectF(rx + 4, box2_y + int(box2_h * 0.68), rw - 8, int(box2_h * 0.28)), Qt.AlignmentFlag.AlignCenter, "SUPPLY SYSTEM")
         
