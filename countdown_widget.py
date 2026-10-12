@@ -11,7 +11,7 @@ import shutil
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QRectF, QPointF
 from PySide6.QtGui import (
-    QPainter, QColor, QFont, QPen, QBrush, QAction, QCursor, QPolygonF, QActionGroup
+    QPainter, QColor, QFont, QFontMetrics, QPen, QBrush, QAction, QCursor, QPolygonF, QActionGroup
 )
 from PySide6.QtWidgets import QApplication, QWidget, QLineEdit, QMenu
 
@@ -243,7 +243,7 @@ class CountdownWidget(QWidget):
         h = self.height()
         
         if self.skin == "evangelion":
-            panel_x = w - int(w * 0.31)
+            panel_x = w - max(124, int(w * 0.34))
             iw = int(panel_x - 30)
             ih = int(h * 0.38)
             ix = 16
@@ -581,16 +581,17 @@ class CountdownWidget(QWidget):
             painter.setPen(QPen(hud_line_col, 1))
             painter.drawLine(tx, ruler_y, tx, ruler_y + (4 if tx % (tick_step * 3) == 0 else 2))
             
-        # Vertical divider separating main area and right column
-        panel_x = w - int(w * 0.31)
+        # Right panel divider: 34% width for the right column
+        panel_x = w - max(124, int(w * 0.34))
         painter.setPen(QPen(hud_line_col, 1.5))
         painter.drawLine(panel_x, 10, panel_x, h - 10)
         
         # Top Header
-        font_size_jp = max(8, int(h * 0.042))
-        font_size_en = max(7, int(h * 0.035))
+        font_size_jp = max(8, int(h * 0.044))
         font_jp = QFont("Noto Serif CJK JP", font_size_jp, QFont.Weight.Bold)
-        font_en = QFont("sans-serif", font_size_en, QFont.Weight.Bold)
+        fm_jp = QFontMetrics(font_jp)
+        jp_text = "活動限界まで"
+        jp_w = fm_jp.horizontalAdvance(jp_text)
         
         header_y = max(18, int(h * 0.11))
         
@@ -601,14 +602,23 @@ class CountdownWidget(QWidget):
         else:
             painter.setFont(font_jp)
             painter.setPen(QColor(255, 60, 60) if is_running else QColor(230, 145, 45))
-            painter.drawText(14, header_y, "活動限界まで")
+            painter.drawText(14, header_y, jp_text)
             
+            # English "ACTIVE TIME REMAINING": placed strictly after Japanese text with clear gap
+            gap = 8
+            text_x = 14 + jp_w + gap
+            avail_en_w = panel_x - text_x - 8
+            
+            font_size_en = max(6, int(h * 0.038))
+            font_en = QFont("sans-serif", font_size_en, QFont.Weight.Bold)
+            while QFontMetrics(font_en).horizontalAdvance("ACTIVE TIME REMAINING") > avail_en_w and font_en.pointSize() > 5:
+                font_en.setPointSize(font_en.pointSize() - 1)
+                
             painter.setFont(font_en)
             painter.setPen(QColor(225, 230, 240))
-            text_x = 14 + int(font_size_jp * 7.0)
             painter.drawText(text_x, header_y, "ACTIVE TIME REMAINING")
             
-            painter.setFont(QFont("Noto Serif CJK JP", max(6, int(h * 0.03))))
+            painter.setFont(QFont("Noto Serif CJK JP", max(6, int(h * 0.032))))
             painter.setPen(QColor(160, 175, 195))
             painter.drawText(14, header_y + int(h * 0.055), "あと")
 
@@ -634,12 +644,12 @@ class CountdownWidget(QWidget):
                 timer_unlit = QColor(36, 10, 10)
                 
             # Dynamic sizing for digits
-            num_chars = len(m_str) + len(s_str) + len(c_str) # e.g. 5 or 6
+            num_chars = len(m_str) + len(s_str) + len(c_str)
             colon_count = 2
             avail_w = panel_x - 24
             
             digit_w = int(avail_w / (num_chars + colon_count * 0.4 + 1.2))
-            digit_h = int(h * 0.32)
+            digit_h = int(h * 0.35)
             digit_gap = max(2, int(digit_w * 0.12))
             colon_w = max(6, int(digit_w * 0.38))
             
@@ -676,23 +686,23 @@ class CountdownWidget(QWidget):
 
         # Bottom status indicators row: [STOP] [SLOW] [NORMAL] [RACING]
         modes = [("STOP", "やめる"), ("SLOW", "スロー"), ("NORMAL", "正常"), ("RACING", "レース")]
-        btn_y = int(h * 0.65)
-        btn_h = int(h * 0.14)
+        btn_y = int(h * 0.68)
+        btn_h = int(h * 0.22)
         btn_gap = max(3, int(w * 0.012))
         btn_w = (panel_x - 26 - (len(modes) - 1) * btn_gap) / len(modes)
         bx = 14
+        active_mode = "NORMAL" if is_running else "STOP"
         
-        if self.paused:
-            active_mode = "STOP"
-        elif self.remaining_seconds < 60:
-            active_mode = "RACING"
-        else:
-            active_mode = "NORMAL"
+        sample_longest = "NORMAL"
+        f_btn_en = QFont("sans-serif", 9, QFont.Weight.Bold)
+        while QFontMetrics(f_btn_en).horizontalAdvance(sample_longest) > btn_w - 6 and f_btn_en.pointSize() > 5:
+            f_btn_en.setPointSize(f_btn_en.pointSize() - 1)
             
+        f_btn_jp = QFont("Noto Serif CJK JP", max(5, int(f_btn_en.pointSize() * 0.85)))
+        
         for en_text, jp_text in modes:
             is_act = (en_text == active_mode)
             box_rect = QRectF(bx, btn_y, btn_w, btn_h)
-            
             if is_act:
                 if en_text in ("STOP", "RACING"):
                     box_bg = QColor(40, 16, 16, 235)
@@ -712,47 +722,38 @@ class CountdownWidget(QWidget):
             painter.drawRect(box_rect)
             
             # English text
-            painter.setFont(QFont("sans-serif", max(6, int(btn_h * 0.28)), QFont.Weight.Bold))
+            painter.setFont(f_btn_en)
             painter.setPen(text_col)
-            painter.drawText(box_rect.adjusted(0, 2, 0, -int(btn_h * 0.38)), Qt.AlignmentFlag.AlignCenter, en_text)
+            painter.drawText(QRectF(bx, btn_y + 3, btn_w, btn_h * 0.45), Qt.AlignmentFlag.AlignCenter, en_text)
             
             # Underline bar for active indicator
             if is_act:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(text_col))
-                painter.drawRect(QRectF(bx + 4, btn_y + btn_h - 3.5, btn_w - 8, 2))
+                painter.drawRect(QRectF(bx + 4, btn_y + btn_h - 4, btn_w - 8, 2.5))
                 
             # Japanese subtext
-            painter.setFont(QFont("Noto Serif CJK JP", max(5, int(btn_h * 0.22))))
+            painter.setFont(f_btn_jp)
             painter.setPen(text_col if is_act else QColor(65, 85, 110))
-            painter.drawText(box_rect.adjusted(0, int(btn_h * 0.48), 0, -2), Qt.AlignmentFlag.AlignCenter, jp_text)
-            
+            painter.drawText(QRectF(bx, btn_y + btn_h * 0.48, btn_w, btn_h * 0.45), Qt.AlignmentFlag.AlignCenter, jp_text)
             bx += btn_w + btn_gap
-
-        # Bottom HUD label
-        sub_y = btn_y + btn_h + 6
-        sub_h = h - sub_y - 10
-        if sub_h > 8:
-            painter.setPen(QPen(QColor(28, 52, 76), 1.0))
-            painter.setBrush(QBrush(QColor(10, 14, 22, 160)))
-            painter.drawRect(QRectF(14, sub_y, panel_x - 26, sub_h))
-            painter.setFont(QFont("sans-serif", max(5, int(sub_h * 0.45))))
-            painter.setPen(QColor(70, 95, 125))
-            painter.drawText(QRectF(14, sub_y, panel_x - 26, sub_h), Qt.AlignmentFlag.AlignCenter, "NERV ACTIVE TIME // TACTICAL HUD")
 
         # RIGHT COLUMN: INTERNAL, MAIN ENERGY, EXTERNAL
         rx = panel_x + 6
         rw = w - rx - 10
         
-        # Dimensions for 3 boxes
         box1_y = 10
         box1_h = int((h - 32) * 0.38)
-        
         box2_y = box1_y + box1_h + 6
         box2_h = int((h - 32) * 0.24)
-        
         box3_y = box2_y + box2_h + 6
         box3_h = h - 10 - box3_y
+        
+        # Hazard stripes area: 30% of rw, placed at the far right
+        hazard_w = max(24, int(rw * 0.30))
+        hazard_x = rx + rw - hazard_w - 4
+        # Text area: strictly between rx + 6 and hazard_x - 4
+        text_w = hazard_x - (rx + 6) - 4
         
         # 1. TOP BOX: INTERNAL (Active when running)
         int_active = is_running
@@ -772,16 +773,19 @@ class CountdownWidget(QWidget):
         int_rect = QRectF(rx, box1_y, rw, box1_h)
         painter.drawRect(int_rect)
         
-        painter.setFont(QFont("Noto Serif CJK JP", max(10, int(box1_h * 0.32)), QFont.Weight.Bold))
+        # Kanji 内部
+        painter.setFont(QFont("Noto Serif CJK JP", max(9, int(box1_h * 0.34)), QFont.Weight.Bold))
         painter.setPen(int_text_col)
-        painter.drawText(rx + 6, box1_y + int(box1_h * 0.48), "内部")
+        painter.drawText(QRectF(rx + 6, box1_y + 4, text_w, int(box1_h * 0.5)), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "内部")
         
-        painter.setFont(QFont("sans-serif", max(7, int(box1_h * 0.16)), QFont.Weight.Bold))
-        painter.drawText(rx + 6, box1_y + int(box1_h * 0.8), "INTERNAL")
+        # English INTERNAL: auto-fitted so it never touches stripes
+        f_int = QFont("sans-serif", max(6, int(box1_h * 0.17)), QFont.Weight.Bold)
+        while QFontMetrics(f_int).horizontalAdvance("INTERNAL") > text_w and f_int.pointSize() > 5:
+            f_int.setPointSize(f_int.pointSize() - 1)
+        painter.setFont(f_int)
+        painter.drawText(QRectF(rx + 6, box1_y + int(box1_h * 0.5), text_w, int(box1_h * 0.45)), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "INTERNAL")
         
         # Hazard stripes on the right of INTERNAL box
-        hazard_w = max(18, int(rw * 0.3))
-        hazard_x = rx + rw - hazard_w - 4
         painter.setClipRect(QRectF(hazard_x, box1_y + 3, hazard_w, box1_h - 6))
         painter.setPen(QPen(stripe_col, max(2.5, box1_h * 0.05)))
         s_step = max(6, int(box1_h * 0.14))
@@ -795,14 +799,18 @@ class CountdownWidget(QWidget):
         box2_rect = QRectF(rx, box2_y, rw, box2_h)
         painter.drawRect(box2_rect)
         
-        painter.setFont(QFont("Noto Serif CJK JP", max(6, int(box2_h * 0.18)), QFont.Weight.Bold))
+        f_mid_jp = QFont("Noto Serif CJK JP", max(6, int(box2_h * 0.2)), QFont.Weight.Bold)
+        while QFontMetrics(f_mid_jp).horizontalAdvance("主電源供給システム") > rw - 8 and f_mid_jp.pointSize() > 5:
+            f_mid_jp.setPointSize(f_mid_jp.pointSize() - 1)
+        painter.setFont(f_mid_jp)
         painter.setPen(QColor(175, 200, 225))
-        painter.drawText(box2_rect.adjusted(2, 3, -2, -int(box2_h * 0.58)), Qt.AlignmentFlag.AlignCenter, "主電源供給システム")
+        painter.drawText(QRectF(rx + 4, box2_y + 2, rw - 8, int(box2_h * 0.4)), Qt.AlignmentFlag.AlignCenter, "主電源供給システム")
         
-        painter.setFont(QFont("sans-serif", max(5, int(box2_h * 0.15)), QFont.Weight.Bold))
+        f_mid_en = QFont("sans-serif", max(5, int(box2_h * 0.16)), QFont.Weight.Bold)
+        painter.setFont(f_mid_en)
         painter.setPen(QColor(135, 170, 205))
-        painter.drawText(box2_rect.adjusted(2, int(box2_h * 0.38), -2, -int(box2_h * 0.24)), Qt.AlignmentFlag.AlignCenter, "MAIN ENERGY")
-        painter.drawText(box2_rect.adjusted(2, int(box2_h * 0.65), -2, -2), Qt.AlignmentFlag.AlignCenter, "SUPPLY SYSTEM")
+        painter.drawText(QRectF(rx + 4, box2_y + int(box2_h * 0.4), rw - 8, int(box2_h * 0.28)), Qt.AlignmentFlag.AlignCenter, "MAIN ENERGY")
+        painter.drawText(QRectF(rx + 4, box2_y + int(box2_h * 0.68), rw - 8, int(box2_h * 0.28)), Qt.AlignmentFlag.AlignCenter, "SUPPLY SYSTEM")
         
         # 3. BOTTOM BOX: EXTERNAL (Active when paused/stopped)
         ext_active = not is_running
@@ -822,12 +830,17 @@ class CountdownWidget(QWidget):
         ext_rect = QRectF(rx, box3_y, rw, box3_h)
         painter.drawRect(ext_rect)
         
-        painter.setFont(QFont("Noto Serif CJK JP", max(10, int(box3_h * 0.32)), QFont.Weight.Bold))
+        # Kanji 外部
+        painter.setFont(QFont("Noto Serif CJK JP", max(9, int(box3_h * 0.34)), QFont.Weight.Bold))
         painter.setPen(ext_text_col)
-        painter.drawText(rx + 6, box3_y + int(box3_h * 0.48), "外部")
+        painter.drawText(QRectF(rx + 6, box3_y + 4, text_w, int(box3_h * 0.5)), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "外部")
         
-        painter.setFont(QFont("sans-serif", max(7, int(box3_h * 0.16)), QFont.Weight.Bold))
-        painter.drawText(rx + 6, box3_y + int(box3_h * 0.8), "EXTERNAL")
+        # English EXTERNAL: auto-fitted so it never touches stripes
+        f_ext = QFont("sans-serif", max(6, int(box3_h * 0.17)), QFont.Weight.Bold)
+        while QFontMetrics(f_ext).horizontalAdvance("EXTERNAL") > text_w and f_ext.pointSize() > 5:
+            f_ext.setPointSize(f_ext.pointSize() - 1)
+        painter.setFont(f_ext)
+        painter.drawText(QRectF(rx + 6, box3_y + int(box3_h * 0.5), text_w, int(box3_h * 0.45)), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "EXTERNAL")
         
         # Hazard stripes on right of EXTERNAL box
         painter.setClipRect(QRectF(hazard_x, box3_y + 3, hazard_w, box3_h - 6))
