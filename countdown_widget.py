@@ -15,35 +15,27 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QWidget, QLineEdit, QMenu
 
-# Audio Generation
-def generate_chime(filename):
+# Audio Duration & Process Player
+def get_wav_duration(wav_path):
+    try:
+        with wave.open(wav_path, 'r') as w:
+            return w.getnframes() / float(w.getframerate())
+    except Exception:
+        return 2.0
+
+def generate_eva_alarm(filename):
     sample_rate = 44100
-    duration = 1.2
+    duration = 2.0
     num_samples = int(sample_rate * duration)
     data = bytearray()
     
     for i in range(num_samples):
         t = i / sample_rate
-        val = 0.0
-        
-        # Beep 1
-        if 0.0 <= t < 0.25:
-            dt = t - 0.0
-            amplitude = math.exp(-15 * dt)
-            val = math.sin(2 * math.pi * 880 * dt) * amplitude
-        # Beep 2
-        elif 0.3 <= t < 0.55:
-            dt = t - 0.3
-            amplitude = math.exp(-15 * dt)
-            val = math.sin(2 * math.pi * 880 * dt) * amplitude
-        # Beep 3
-        elif 0.6 <= t < 1.1:
-            dt = t - 0.6
-            amplitude = math.exp(-5 * dt)
-            val = math.sin(2 * math.pi * 1320 * dt) * amplitude
-            
+        cycle_t = (t % 1.0)
+        freq = 3200.0 - 1600.0 * cycle_t
+        val = 0.6 * math.sin(2 * math.pi * freq * t) + 0.3 * math.sin(4 * math.pi * freq * t)
         sample = int(val * 32767)
-        data.extend(struct.pack('<h', sample))
+        data.extend(struct.pack('<h', max(-32767, min(32767, sample))))
         
     try:
         with wave.open(filename, 'wb') as wav_file:
@@ -52,18 +44,56 @@ def generate_chime(filename):
             wav_file.setframerate(sample_rate)
             wav_file.writeframes(data)
     except Exception as e:
-        print(f"Error generating chime sound: {e}")
+        print(f"Error generating eva alarm sound: {e}")
 
-# Play audio
-def play_sound(wav_path):
+def generate_start_sound(filename):
+    sample_rate = 44100
+    duration = 0.28
+    num_samples = int(sample_rate * duration)
+    data = bytearray()
+
+    for i in range(num_samples):
+        t = i / sample_rate
+        val = 0.0
+        # Tone 1: 987 Hz (B5) for 0.08s
+        if 0.0 <= t < 0.08:
+            env = min(1.0, t / 0.01) * math.exp(-8 * (t - 0.01)) if t > 0.01 else t / 0.01
+            val = 0.7 * math.sin(2 * math.pi * 987.77 * t) * env
+            val += 0.2 * math.sin(2 * math.pi * 1975.5 * t) * env
+        # Tone 2: 1318.5 Hz (E6) for 0.18s
+        elif 0.09 <= t < 0.26:
+            dt = t - 0.09
+            env = min(1.0, dt / 0.01) * math.exp(-12 * dt)
+            val = 0.8 * math.sin(2 * math.pi * 1318.5 * dt) * env
+            val += 0.25 * math.sin(2 * math.pi * 2637.0 * dt) * env
+
+        sample = int(val * 32767)
+        data.extend(struct.pack('<h', max(-32767, min(32767, sample))))
+
+    try:
+        with wave.open(filename, 'wb') as f:
+            f.setnchannels(1)
+            f.setsampwidth(2)
+            f.setframerate(sample_rate)
+            f.writeframes(data)
+    except Exception as e:
+        print(f"Error generating start sound: {e}")
+
+# Play audio process with handle tracking
+def play_sound_process(wav_path):
+    if not os.path.exists(wav_path):
+        return None
     for player in ['pw-play', 'paplay', 'aplay']:
         if shutil.which(player):
             try:
-                subprocess.Popen([player, wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return True
+                return subprocess.Popen([player, wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 continue
-    return False
+    return None
+
+def play_sound(wav_path):
+    proc = play_sound_process(wav_path)
+    return proc is not None
 
 # Desktop Notification
 def send_notification(title, message):
@@ -100,10 +130,25 @@ class CountdownWidget(QWidget):
         # Active skin: 'evangelion' or 'classic'
         self.skin = self.config.get("skin", "evangelion")
         
-        # Sound file
+        # Sound & alarm configuration
+        self.sound_enabled = self.config.get("sound_enabled", True)
+        self.max_alarm_repeats = int(self.config.get("alarm_repeats", 10))
+        self.audio_process = None
+        self.alarm_repeats_played = 0
+        
+        # Sound files
+        self.alarm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alarm.wav")
+        self.start_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start.wav")
         self.chime_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chime.wav")
-        if not os.path.exists(self.chime_path):
-            generate_chime(self.chime_path)
+        if not os.path.exists(self.alarm_path):
+            if os.path.exists(self.chime_path):
+                self.alarm_path = self.chime_path
+            else:
+                generate_eva_alarm(self.alarm_path)
+        if not os.path.exists(self.start_path):
+            generate_start_sound(self.start_path)
+            
+        self.alarm_duration = get_wav_duration(self.alarm_path)
             
         self.init_ui()
         
@@ -114,12 +159,18 @@ class CountdownWidget(QWidget):
         self.alarm_timer = QTimer(self)
         self.alarm_timer.timeout.connect(self.alarm_flash_tick)
         
+        self.alarm_sound_timer = QTimer(self)
+        self.alarm_sound_timer.timeout.connect(self.play_alarm_repeat)
+        
     def init_ui(self):
         # Frameless, Window, Always on Top, Tool window
         flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window | Qt.WindowType.Tool
         if self.config.get("always_on_top", True):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
+        
+        # Enable keyboard focus for Space hotkey
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         # Translucent background
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -192,7 +243,9 @@ class CountdownWidget(QWidget):
             "size": 150,
             "eva_width": 380,
             "eva_height": 240,
-            "skin": "evangelion"
+            "skin": "evangelion",
+            "sound_enabled": True,
+            "alarm_repeats": 10
         }
         if os.path.exists(self.config_path):
             try:
@@ -212,6 +265,8 @@ class CountdownWidget(QWidget):
             self.config["x"] = self.x()
             self.config["y"] = self.y()
             self.config["skin"] = self.skin
+            self.config["sound_enabled"] = self.sound_enabled
+            self.config["alarm_repeats"] = self.max_alarm_repeats
             if self.skin == "evangelion":
                 self.config["eva_width"] = self.width()
                 self.config["eva_height"] = self.height()
@@ -279,10 +334,25 @@ class CountdownWidget(QWidget):
     # Dragging & click handling
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self.setFocus()
+            # If alarm is active, stop it immediately on click
+            if self.alarm_active:
+                self.stop_alarm()
+                self.reset_timer()
+                event.accept()
+                return
             self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self.drag_start_pos = event.globalPosition().toPoint()
             self.dragged = False
             event.accept()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            if not self.input_field.isVisible():
+                self.toggle_timer()
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton:
@@ -352,11 +422,15 @@ class CountdownWidget(QWidget):
             
         self.paused = not self.paused
         if not self.paused:
+            if self.sound_enabled and os.path.exists(self.start_path):
+                self.stop_current_sound()
+                self.audio_process = play_sound_process(self.start_path)
             self.start_timestamp = time.time() - (self.total_seconds - self.remaining_seconds)
             # 33ms interval for Eva skin for fluid centiseconds, 100ms for classic skin
             tick_interval = 33 if self.skin == "evangelion" else 100
             self.timer.start(tick_interval)
         else:
+            self.stop_current_sound()
             self.timer.stop()
         self.update()
         self.save_config()
@@ -434,16 +508,49 @@ class CountdownWidget(QWidget):
             self.remaining_seconds = rem
             self.update()
 
+    def stop_current_sound(self):
+        if self.audio_process:
+            try:
+                if self.audio_process.poll() is None:
+                    self.audio_process.terminate()
+                    try:
+                        self.audio_process.wait(timeout=0.15)
+                    except Exception:
+                        self.audio_process.kill()
+            except Exception:
+                pass
+            self.audio_process = None
+
     def trigger_alarm(self):
         self.timer.stop()
         self.alarm_active = True
         self.alarm_flash_state = True
         self.alarm_timer.start(500)
         
-        play_sound(self.chime_path)
-        send_notification("Таймер завершен!", f"Истекло время: {int(self.total_seconds // 60)} мин.")
+        self.alarm_repeats_played = 0
+        self.play_alarm_repeat()
         
+        send_notification("Таймер завершен!", f"Истекло время: {int(self.total_seconds // 60)} мин.")
         self.update()
+
+    def play_alarm_repeat(self):
+        if not self.alarm_active:
+            self.alarm_sound_timer.stop()
+            self.stop_current_sound()
+            return
+            
+        if self.alarm_repeats_played >= self.max_alarm_repeats:
+            self.alarm_sound_timer.stop()
+            self.stop_current_sound()
+            return
+            
+        if self.sound_enabled:
+            self.stop_current_sound()
+            self.audio_process = play_sound_process(self.alarm_path)
+            
+        self.alarm_repeats_played += 1
+        interval_ms = max(500, int(self.alarm_duration * 1000))
+        self.alarm_sound_timer.start(interval_ms)
 
     def alarm_flash_tick(self):
         self.alarm_flash_state = not self.alarm_flash_state
@@ -451,9 +558,22 @@ class CountdownWidget(QWidget):
 
     def stop_alarm(self):
         self.alarm_timer.stop()
+        self.alarm_sound_timer.stop()
+        self.stop_current_sound()
         self.alarm_active = False
         self.alarm_flash_state = False
         self.update()
+
+    def toggle_sound(self):
+        self.sound_enabled = not self.sound_enabled
+        if not self.sound_enabled:
+            self.stop_current_sound()
+            self.alarm_sound_timer.stop()
+        self.save_config()
+
+    def closeEvent(self, event):
+        self.stop_alarm()
+        super().closeEvent(event)
 
     # 7-Segment digit drawing
     def draw_7segment_digit(self, painter, x, y, w, h, digit, lit_color, unlit_color, slant_deg=5):
@@ -1085,6 +1205,11 @@ class CountdownWidget(QWidget):
         skin_group.addAction(classic_action)
         
         menu.addSeparator()
+        
+        sound_action = menu.addAction("Звуковые эффекты")
+        sound_action.setCheckable(True)
+        sound_action.setChecked(self.sound_enabled)
+        sound_action.triggered.connect(self.toggle_sound)
         
         always_top_action = menu.addAction("Всегда поверх окон")
         always_top_action.setCheckable(True)

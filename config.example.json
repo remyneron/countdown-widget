@@ -4,5 +4,7 @@
     "size": 150,
     "eva_width": 380,
     "eva_height": 240,
-    "skin": "evangelion"
+    "skin": "evangelion",
+    "sound_enabled": true,
+    "alarm_repeats": 10
 }
