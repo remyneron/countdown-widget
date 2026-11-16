@@ -9,11 +9,79 @@ import json
 import subprocess
 import shutil
 
-from PySide6.QtCore import Qt, QTimer, QPoint, QRectF, QPointF
+from PySide6.QtCore import Qt, QTimer, QPoint, QRect, QRectF, QPointF
 from PySide6.QtGui import (
-    QPainter, QColor, QFont, QFontMetrics, QPen, QBrush, QAction, QCursor, QPolygonF, QActionGroup
+    QPainter, QColor, QFont, QFontMetrics, QPen, QBrush, QCursor, QPolygonF, QActionGroup
 )
 from PySide6.QtWidgets import QApplication, QWidget, QLineEdit, QMenu
+
+# Limits
+MIN_DURATION_SECONDS = 1.0
+MAX_DURATION_SECONDS = 999 * 60.0
+WHEEL_STEP = 120  # angleDelta units per mouse wheel notch
+SKINS = ("evangelion", "classic")
+PRESET_MINUTES = (1, 3, 5, 10, 15, 25, 30, 45, 60)
+CENTIS_SCALE = 0.68  # height of the centisecond digits relative to minutes and seconds (width stays the same)
+
+DEFAULT_CONFIG = {
+    "duration_seconds": 1500.0,
+    "always_on_top": True,
+    "size": 150,
+    "eva_width": 380,
+    "eva_height": 240,
+    "skin": "evangelion",
+    "sound_enabled": True,
+    "alarm_repeats": 10
+}
+
+# (min, max, type) for numeric config values
+CONFIG_RANGES = {
+    "duration_seconds": (MIN_DURATION_SECONDS, MAX_DURATION_SECONDS, float),
+    "size": (80, 400, int),
+    "eva_width": (220, 700, int),
+    "eva_height": (140, 450, int),
+    "alarm_repeats": (0, 1000, int),
+}
+
+def is_finite_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+def sanitize_config(raw):
+    """Return a config dict where every known key has a valid type and range."""
+    config = dict(DEFAULT_CONFIG)
+    if not isinstance(raw, dict):
+        return config
+    config.update(raw)
+
+    for key, (lo, hi, cast) in CONFIG_RANGES.items():
+        value = config[key]
+        if is_finite_number(value):
+            config[key] = cast(min(hi, max(lo, value)))
+        else:
+            config[key] = DEFAULT_CONFIG[key]
+
+    for key in ("always_on_top", "sound_enabled"):
+        if not isinstance(config[key], bool):
+            config[key] = DEFAULT_CONFIG[key]
+
+    if config["skin"] not in SKINS:
+        config["skin"] = DEFAULT_CONFIG["skin"]
+
+    # Position is optional: without it the widget is placed in the top-right corner
+    if is_finite_number(config.get("x")) and is_finite_number(config.get("y")):
+        config["x"] = int(config["x"])
+        config["y"] = int(config["y"])
+    else:
+        config.pop("x", None)
+        config.pop("y", None)
+    return config
+
+def now():
+    """Clock for the countdown: unaffected by wall-clock changes, keeps counting during suspend."""
+    try:
+        return time.clock_gettime(time.CLOCK_BOOTTIME)
+    except (AttributeError, OSError):
+        return time.monotonic()
 
 # Audio Duration & Process Player
 def get_wav_duration(wav_path):
@@ -45,39 +113,6 @@ def generate_eva_alarm(filename):
             wav_file.writeframes(data)
     except Exception as e:
         print(f"Error generating eva alarm sound: {e}")
-
-def generate_start_sound(filename):
-    sample_rate = 44100
-    duration = 0.28
-    num_samples = int(sample_rate * duration)
-    data = bytearray()
-
-    for i in range(num_samples):
-        t = i / sample_rate
-        val = 0.0
-        # Tone 1: 987 Hz (B5) for 0.08s
-        if 0.0 <= t < 0.08:
-            env = min(1.0, t / 0.01) * math.exp(-8 * (t - 0.01)) if t > 0.01 else t / 0.01
-            val = 0.7 * math.sin(2 * math.pi * 987.77 * t) * env
-            val += 0.2 * math.sin(2 * math.pi * 1975.5 * t) * env
-        # Tone 2: 1318.5 Hz (E6) for 0.18s
-        elif 0.09 <= t < 0.26:
-            dt = t - 0.09
-            env = min(1.0, dt / 0.01) * math.exp(-12 * dt)
-            val = 0.8 * math.sin(2 * math.pi * 1318.5 * dt) * env
-            val += 0.25 * math.sin(2 * math.pi * 2637.0 * dt) * env
-
-        sample = int(val * 32767)
-        data.extend(struct.pack('<h', max(-32767, min(32767, sample))))
-
-    try:
-        with wave.open(filename, 'wb') as f:
-            f.setnchannels(1)
-            f.setsampwidth(2)
-            f.setframerate(sample_rate)
-            f.writeframes(data)
-    except Exception as e:
-        print(f"Error generating start sound: {e}")
 
 # Play audio process with handle tracking
 def play_sound_process(wav_path):
@@ -126,6 +161,13 @@ class CountdownWidget(QWidget):
         self.alarm_flash_state = False
         self.start_timestamp = 0.0
         self.double_clicked = False
+
+        # Mouse state
+        self.dragged = False
+        self.drag_position = QPoint()
+        self.drag_start_pos = QPoint()
+        self.ignore_release = False
+        self.wheel_accum = 0
         
         # Active skin: 'evangelion' or 'classic'
         self.skin = self.config.get("skin", "evangelion")
@@ -138,15 +180,12 @@ class CountdownWidget(QWidget):
         
         # Sound files
         self.alarm_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alarm.wav")
-        self.start_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start.wav")
         self.chime_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chime.wav")
         if not os.path.exists(self.alarm_path):
             if os.path.exists(self.chime_path):
                 self.alarm_path = self.chime_path
             else:
                 generate_eva_alarm(self.alarm_path)
-        if not os.path.exists(self.start_path):
-            generate_start_sound(self.start_path)
             
         self.alarm_duration = get_wav_duration(self.alarm_path)
             
@@ -161,6 +200,12 @@ class CountdownWidget(QWidget):
         
         self.alarm_sound_timer = QTimer(self)
         self.alarm_sound_timer.timeout.connect(self.play_alarm_repeat)
+
+        # Debounced config writes for rapid changes (mouse wheel)
+        self.save_timer = QTimer(self)
+        self.save_timer.setSingleShot(True)
+        self.save_timer.setInterval(400)
+        self.save_timer.timeout.connect(self.save_config)
         
     def init_ui(self):
         # Frameless, Window, Always on Top, Tool window
@@ -182,21 +227,19 @@ class CountdownWidget(QWidget):
             w = self.config.get("eva_width", 380)
             h = self.config.get("eva_height", 240)
             self.setFixedSize(w, h)
-            default_x = screen.width() - w - 40
-            default_y = 60
+            default_x = screen.x() + screen.width() - w - 40
+            default_y = screen.y() + 60
         else:
             size = self.config.get("size", 150)
             self.setFixedSize(size, size)
-            default_x = screen.width() - size - 50
-            default_y = 100
+            default_x = screen.x() + screen.width() - size - 50
+            default_y = screen.y() + 100
         
-        x = self.config.get("x", default_x)
-        y = self.config.get("y", default_y)
+        x = self.config.get("x")
+        y = self.config.get("y")
         
-        # Validate coordinates (e.g. if they are completely off-screen, reset to defaults)
-        cur_w = self.width()
-        cur_h = self.height()
-        if x < -cur_w or x > screen.width() or y < -cur_h or y > screen.height():
+        # No saved position, or it is not reachable on any connected screen: use defaults
+        if x is None or y is None or not self.is_position_on_screen(x, y):
             x = default_x
             y = default_y
             
@@ -234,48 +277,55 @@ class CountdownWidget(QWidget):
         
         self.setWindowTitle("countdown")
         
+    def is_position_on_screen(self, x, y):
+        # At least a grabbable part of the widget must be visible on one of the screens
+        rect = QRect(x, y, self.width(), self.height())
+        for screen in QApplication.screens():
+            visible = screen.geometry().intersected(rect)
+            if visible.width() >= 40 and visible.height() >= 40:
+                return True
+        return False
+
     def load_config(self):
-        default_config = {
-            "duration_seconds": 1500.0,
-            "always_on_top": True,
-            "x": 100,
-            "y": 100,
-            "size": 150,
-            "eva_width": 380,
-            "eva_height": 240,
-            "skin": "evangelion",
-            "sound_enabled": True,
-            "alarm_repeats": 10
-        }
-        if os.path.exists(self.config_path):
-            try:
-                with open(self.config_path, "r") as f:
-                    self.config = json.load(f)
-                    for k, v in default_config.items():
-                        self.config.setdefault(k, v)
-            except Exception:
-                self.config = default_config
-        else:
-            self.config = default_config
+        raw = None
+        try:
+            with open(self.config_path, "r") as f:
+                raw = json.load(f)
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as e:
+            print(f"Cannot read config {self.config_path}: {e}", file=sys.stderr)
+        self.config = sanitize_config(raw)
+
+    def schedule_save(self):
+        self.save_timer.start()
 
     def save_config(self):
+        self.save_timer.stop()
+        self.config["duration_seconds"] = self.total_seconds
+        self.config["always_on_top"] = bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+        self.config["x"] = self.x()
+        self.config["y"] = self.y()
+        self.config["skin"] = self.skin
+        self.config["sound_enabled"] = self.sound_enabled
+        self.config["alarm_repeats"] = self.max_alarm_repeats
+        if self.skin == "evangelion":
+            self.config["eva_width"] = self.width()
+            self.config["eva_height"] = self.height()
+        else:
+            self.config["size"] = self.width()
+        # Write to a temp file first so a crash mid-write cannot corrupt the config
+        tmp_path = self.config_path + ".tmp"
         try:
-            self.config["duration_seconds"] = self.total_seconds
-            self.config["always_on_top"] = bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
-            self.config["x"] = self.x()
-            self.config["y"] = self.y()
-            self.config["skin"] = self.skin
-            self.config["sound_enabled"] = self.sound_enabled
-            self.config["alarm_repeats"] = self.max_alarm_repeats
-            if self.skin == "evangelion":
-                self.config["eva_width"] = self.width()
-                self.config["eva_height"] = self.height()
-            else:
-                self.config["size"] = self.width()
-            with open(self.config_path, "w") as f:
-                json.dump(self.config, f, indent=4)
-        except Exception:
-            pass
+            with open(tmp_path, "w") as f:
+                json.dump(self.config, f, indent=4, allow_nan=False)
+            os.replace(tmp_path, self.config_path)
+        except (OSError, ValueError) as e:
+            print(f"Cannot save config {self.config_path}: {e}", file=sys.stderr)
+
+    def tick_interval(self):
+        # 33ms for Eva skin for fluid centiseconds, 100ms for classic skin
+        return 33 if self.skin == "evangelion" else 100
 
     def set_skin(self, new_skin):
         if self.skin == new_skin:
@@ -289,6 +339,8 @@ class CountdownWidget(QWidget):
             size = self.config.get("size", 150)
             self.setFixedSize(size, size)
             
+        if self.timer.isActive():
+            self.timer.setInterval(self.tick_interval())
         self.save_config()
         self.update()
 
@@ -335,27 +387,32 @@ class CountdownWidget(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.setFocus()
-            # If alarm is active, stop it immediately on click
+            self.dragged = False
+            # If alarm is active, stop it immediately on click.
+            # The matching release must not start the countdown again.
             if self.alarm_active:
+                self.ignore_release = True
                 self.stop_alarm()
                 self.reset_timer()
                 event.accept()
                 return
+            self.ignore_release = False
             self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self.drag_start_pos = event.globalPosition().toPoint()
-            self.dragged = False
             event.accept()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Space:
             if not self.input_field.isVisible():
-                self.toggle_timer()
+                # Holding the key down must not toggle repeatedly
+                if not event.isAutoRepeat():
+                    self.toggle_timer()
                 event.accept()
                 return
         super().keyPressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton:
+        if event.buttons() == Qt.MouseButton.LeftButton and not self.ignore_release:
             delta = event.globalPosition().toPoint() - self.drag_start_pos
             if delta.manhattanLength() > 5:
                 self.dragged = True
@@ -364,6 +421,11 @@ class CountdownWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if self.ignore_release:
+                self.ignore_release = False
+                event.accept()
+                return
+                
             if self.double_clicked:
                 self.double_clicked = False
                 event.accept()
@@ -382,33 +444,38 @@ class CountdownWidget(QWidget):
             event.accept()
 
     def wheelEvent(self, event):
+        # Accumulate vertical scroll into whole notches: touchpads send many small deltas,
+        # and horizontal scrolling (angleDelta().y() == 0) must not change anything
+        self.wheel_accum += event.angleDelta().y()
+        steps = int(self.wheel_accum / WHEEL_STEP)
+        self.wheel_accum -= steps * WHEEL_STEP
+        event.accept()
+        if steps == 0:
+            return
+            
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             # Scale widget size
-            angle = event.angleDelta().y()
-            scale = 1.1 if angle > 0 else 0.9
+            scale = 1.1 ** steps
             
             if self.skin == "evangelion":
-                new_w = int(self.width() * scale)
-                new_h = int(self.height() * scale)
+                new_w = round(self.width() * scale)
+                new_h = round(self.height() * scale)
                 if 220 <= new_w <= 700 and 140 <= new_h <= 450:
                     self.setFixedSize(new_w, new_h)
                     self.update()
-                    self.save_config()
+                    self.schedule_save()
             else:
-                new_size = int(self.width() * scale)
+                new_size = round(self.width() * scale)
                 if 80 <= new_size <= 400:
                     self.setFixedSize(new_size, new_size)
                     self.update()
-                    self.save_config()
-            event.accept()
+                    self.schedule_save()
         else:
-            # Adjust timer when paused
-            if self.paused and not self.alarm_active and not self.input_field.isVisible():
-                angle = event.angleDelta().y()
-                delta = 60 if angle > 0 else -60
-                new_time = max(60.0, self.total_seconds + delta)
-                self.set_duration(new_time)
-                event.accept()
+            # Adjust duration only while the timer is reset: a paused countdown keeps its progress
+            not_started = self.paused and self.remaining_seconds == self.total_seconds
+            if not_started and not self.alarm_active and not self.input_field.isVisible():
+                new_time = max(60.0, self.total_seconds + 60 * steps)
+                self.set_duration(new_time, save_later=True)
 
     def toggle_timer(self):
         if self.input_field.isVisible():
@@ -422,18 +489,14 @@ class CountdownWidget(QWidget):
             
         self.paused = not self.paused
         if not self.paused:
-            if self.sound_enabled and os.path.exists(self.start_path):
-                self.stop_current_sound()
-                self.audio_process = play_sound_process(self.start_path)
-            self.start_timestamp = time.time() - (self.total_seconds - self.remaining_seconds)
-            # 33ms interval for Eva skin for fluid centiseconds, 100ms for classic skin
-            tick_interval = 33 if self.skin == "evangelion" else 100
-            self.timer.start(tick_interval)
+            self.start_timestamp = now() - (self.total_seconds - self.remaining_seconds)
+            self.timer.start(self.tick_interval())
         else:
             self.stop_current_sound()
             self.timer.stop()
+            # Freeze the exact remaining time instead of the value from the last tick
+            self.remaining_seconds = max(0.0, self.total_seconds - (now() - self.start_timestamp))
         self.update()
-        self.save_config()
 
     def reset_timer(self):
         self.paused = True
@@ -443,13 +506,19 @@ class CountdownWidget(QWidget):
         self.update()
         self.save_config()
 
-    def set_duration(self, seconds):
-        self.total_seconds = float(seconds)
+    def set_duration(self, seconds, save_later=False):
+        seconds = float(seconds)
+        if not math.isfinite(seconds):
+            return
+        self.total_seconds = min(MAX_DURATION_SECONDS, max(MIN_DURATION_SECONDS, seconds))
         self.remaining_seconds = self.total_seconds
         if not self.paused:
-            self.start_timestamp = time.time()
+            self.start_timestamp = now()
         self.update()
-        self.save_config()
+        if save_later:
+            self.schedule_save()
+        else:
+            self.save_config()
 
     def start_inline_edit(self):
         if not self.paused:
@@ -470,7 +539,8 @@ class CountdownWidget(QWidget):
         try:
             text = text.replace(',', '.')
             minutes = float(text)
-            if minutes <= 0:
+            # float() also accepts "nan" and "inf"
+            if not math.isfinite(minutes) or minutes <= 0:
                 raise ValueError
             self.set_duration(minutes * 60)
         except ValueError:
@@ -498,7 +568,7 @@ class CountdownWidget(QWidget):
         if self.paused or self.alarm_active:
             return
             
-        elapsed = time.time() - self.start_timestamp
+        elapsed = now() - self.start_timestamp
         rem = self.total_seconds - elapsed
         
         if rem <= 0:
@@ -573,6 +643,8 @@ class CountdownWidget(QWidget):
 
     def closeEvent(self, event):
         self.stop_alarm()
+        if self.save_timer.isActive():
+            self.save_config()
         super().closeEvent(event)
 
     # 7-Segment digit drawing
@@ -789,13 +861,21 @@ class CountdownWidget(QWidget):
             colon_w = max(6, int(u * 0.30))
             colon_gap = max(6, int(u * 0.35))
             
+            # Centiseconds are shorter than minutes and seconds but keep the same width,
+            # segment thickness and spacing, and sit on the same baseline
+            s_digit_w = digit_w
+            s_digit_h = int(digit_h * CENTIS_SCALE)
+            s_digit_gap = digit_gap
+            s_colon_w = colon_w
+            s_colon_gap = colon_gap
+            
             # Helper to draw colon with matching italic slant
-            def draw_colon(cx, cy, cw, ch):
+            def draw_colon(cx, cy, cw, ch, dw):
                 painter.save()
                 painter.translate(cx, cy)
                 shear_val = math.tan(math.radians(-slant_deg))
                 painter.shear(shear_val, 0)
-                dot_s = max(3, int(digit_w * 0.20))
+                dot_s = max(3, int(dw * 0.20))
                 dot_x = (cw - dot_s) * 0.5
                 painter.setBrush(QBrush(timer_lit))
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -808,12 +888,13 @@ class CountdownWidget(QWidget):
                 len(m_str) * digit_w + (len(m_str) - 1) * digit_gap
                 + colon_gap + colon_w + colon_gap
                 + len(s_str) * digit_w + (len(s_str) - 1) * digit_gap
-                + colon_gap + colon_w + colon_gap
-                + len(c_str) * digit_w + (len(c_str) - 1) * digit_gap
+                + s_colon_gap + s_colon_w + s_colon_gap
+                + len(c_str) * s_digit_w + (len(c_str) - 1) * s_digit_gap
             )
             
             # Perfectly center the timer display in the left panel
             digit_y = int(h * 0.19)
+            s_digit_y = digit_y + digit_h - s_digit_h
             cur_x = 12 + max(0, int((avail_w - total_display_w) / 2))
             
             # 1. Minutes
@@ -824,7 +905,7 @@ class CountdownWidget(QWidget):
             
             # Colon 1
             cur_x += colon_gap
-            draw_colon(cur_x, digit_y, colon_w, digit_h)
+            draw_colon(cur_x, digit_y, colon_w, digit_h, digit_w)
             cur_x += colon_w + colon_gap
             
             # 2. Seconds
@@ -833,15 +914,15 @@ class CountdownWidget(QWidget):
                 cur_x += digit_w + digit_gap
             cur_x -= digit_gap
             
-            # Colon 2
-            cur_x += colon_gap
-            draw_colon(cur_x, digit_y, colon_w, digit_h)
-            cur_x += colon_w + colon_gap
+            # Colon 2 (small, on the baseline)
+            cur_x += s_colon_gap
+            draw_colon(cur_x, s_digit_y, s_colon_w, s_digit_h, s_digit_w)
+            cur_x += s_colon_w + s_colon_gap
             
-            # 3. Centiseconds
+            # 3. Centiseconds (small, on the baseline)
             for ch in c_str:
-                self.draw_7segment_digit(painter, cur_x, digit_y, digit_w, digit_h, ch, timer_lit, timer_unlit, slant_deg)
-                cur_x += digit_w + digit_gap
+                self.draw_7segment_digit(painter, cur_x, s_digit_y, s_digit_w, s_digit_h, ch, timer_lit, timer_unlit, slant_deg)
+                cur_x += s_digit_w + s_digit_gap
 
         # Bottom status indicators row: [STOP] [SLOW] [NORMAL] [RACING]
         # Aligned with External block grid (starts at box3_y) and occupying ~half of its vertical height
@@ -1178,8 +1259,7 @@ class CountdownWidget(QWidget):
         menu.addSeparator()
         
         presets_menu = menu.addMenu("Предустановки")
-        presets = [1, 3, 5, 10, 15, 25, 45, 60]
-        for p in presets:
+        for p in PRESET_MINUTES:
             action = presets_menu.addAction(f"{p} мин")
             action.triggered.connect(lambda checked=False, val=p: self.set_duration(val * 60))
             
@@ -1190,7 +1270,7 @@ class CountdownWidget(QWidget):
         
         # Skin switcher menu
         skins_menu = menu.addMenu("Скин оформления")
-        skin_group = QActionGroup(self)
+        skin_group = QActionGroup(menu)
         
         eva_action = skins_menu.addAction("Евангелион (NERV HUD)")
         eva_action.setCheckable(True)
@@ -1224,6 +1304,8 @@ class CountdownWidget(QWidget):
         
         # Use robust cursor position for menu display
         menu.exec(QCursor.pos())
+        # The menu is rebuilt on every right click: free it together with its actions
+        menu.deleteLater()
 
 def main():
     app = QApplication(sys.argv)

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2738"/>
+      <stop offset="1" stop-color="#0a0d14"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7df6ff"/>
+      <stop offset="1" stop-color="#00b4e6"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff6a5c"/>
+      <stop offset="1" stop-color="#ff2d2d"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Body -->
+  <rect x="12" y="12" width="232" height="232" rx="56" fill="url(#bg)"/>
+  <rect x="13" y="13" width="230" height="230" rx="55" fill="none" stroke="#2f4563" stroke-width="2"/>
+
+  <!-- Progress ring: 75% remaining, clockwise from the top like the classic skin -->
+  <circle cx="128" cy="128" r="80" fill="none" stroke="#1b2536" stroke-width="16"/>
+  <path d="M 128 48 A 80 80 0 1 1 48 128" fill="none" stroke="#00e6ff" stroke-opacity="0.045" stroke-width="36" stroke-linecap="round"/>
+  <path d="M 128 48 A 80 80 0 1 1 48 128" fill="none" stroke="#00e6ff" stroke-opacity="0.045" stroke-width="32" stroke-linecap="round"/>
+  <path d="M 128 48 A 80 80 0 1 1 48 128" fill="none" stroke="#00e6ff" stroke-opacity="0.045" stroke-width="28" stroke-linecap="round"/>
+  <path d="M 128 48 A 80 80 0 1 1 48 128" fill="none" stroke="#00e6ff" stroke-opacity="0.045" stroke-width="24" stroke-linecap="round"/>
+  <path d="M 128 48 A 80 80 0 1 1 48 128" fill="none" stroke="#00e6ff" stroke-opacity="0.045" stroke-width="20" stroke-linecap="round"/>
+  <path d="M 128 48 A 80 80 0 1 1 48 128" fill="none" stroke="url(#cyan)" stroke-width="16" stroke-linecap="round"/>
+
+  <!-- Seven-segment "25" with the slant of the Evangelion skin -->
+  <g transform="translate(128 128) skewX(-6) translate(-128 -128)">
+    <polygon points="88.0,97.8 92.7,93.0 111.3,93.0 116.0,97.8 111.3,102.5 92.7,102.5" fill="url(#red)"/>
+    <polygon points="117.2,99.0 122.0,103.7 122.0,122.0 117.2,126.8 112.5,122.0 112.5,103.7" fill="url(#red)"/>
+    <polygon points="117.2,129.2 122.0,133.9 122.0,152.3 117.2,157.1 112.5,152.3 112.5,133.9" fill="#2b1719"/>
+    <polygon points="88.0,158.2 92.7,153.5 111.3,153.5 116.0,158.2 111.3,163.0 92.7,163.0" fill="url(#red)"/>
+    <polygon points="86.8,129.2 91.5,133.9 91.5,152.3 86.8,157.1 82.0,152.3 82.0,133.9" fill="url(#red)"/>
+    <polygon points="86.8,99.0 91.5,103.7 91.5,122.0 86.8,126.8 82.0,122.0 82.0,103.7" fill="#2b1719"/>
+    <polygon points="88.0,128.0 92.7,123.2 111.3,123.2 116.0,128.0 111.3,132.8 92.7,132.8" fill="url(#red)"/>
+    <polygon points="139.9,97.8 144.7,93.0 163.3,93.0 168.1,97.8 163.3,102.5 144.7,102.5" fill="url(#red)"/>
+    <polygon points="169.2,99.0 174.0,103.7 174.0,122.0 169.2,126.8 164.5,122.0 164.5,103.7" fill="#2b1719"/>
+    <polygon points="169.2,129.2 174.0,133.9 174.0,152.3 169.2,157.1 164.5,152.3 164.5,133.9" fill="url(#red)"/>
+    <polygon points="139.9,158.2 144.7,153.5 163.3,153.5 168.1,158.2 163.3,163.0 144.7,163.0" fill="url(#red)"/>
+    <polygon points="138.8,129.2 143.5,133.9 143.5,152.3 138.8,157.1 134.0,152.3 134.0,133.9" fill="#2b1719"/>
+    <polygon points="138.8,99.0 143.5,103.7 143.5,122.0 138.8,126.8 134.0,122.0 134.0,103.7" fill="url(#red)"/>
+    <polygon points="139.9,128.0 144.7,123.2 163.3,123.2 168.1,128.0 163.3,132.8 144.7,132.8" fill="url(#red)"/>
+  </g>
+</svg>
